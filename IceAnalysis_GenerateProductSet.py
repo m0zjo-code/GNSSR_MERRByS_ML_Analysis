@@ -9,8 +9,9 @@ Created on Fri Dec 18 14:34:41 2020
 import datetime, os
 
 GENERATE_TRAINING_DATA = True
-GENERATE_TRAINING_DATA_NPY = True
-GENERATE_IMG_FILES = True
+GENERATE_TRAINING_DATA_NPY = False
+GENERATE_IMG_FILES = False
+CLASSIFY_DATA = True
 
 # Destination to read data from
 dataFolder = os.path.join(os.getcwd() , 'Data/')
@@ -18,17 +19,17 @@ dataFolder = os.path.join(os.getcwd() , 'Data/')
 #Time range of interest
 # Data is segmented every 6 hours so hours must be one of [3, 9, 15, 21]
 
-#startTime = datetime.datetime(2018, 11, 1, 3, 0, 0)
-#stopTime = datetime.datetime(2018, 11, 3, 21, 0, 0)
+startTime = datetime.datetime(2018, 11, 1, 3, 0, 0)
+stopTime = datetime.datetime(2018, 11, 3, 21, 0, 0)
 
-startTime = datetime.datetime(2018, 11, 2, 21, 0, 0)
-stopTime = datetime.datetime(2018, 11, 3, 3, 0, 0)
+#startTime = datetime.datetime(2018, 11, 2, 21, 0, 0)
+#stopTime = datetime.datetime(2018, 11, 3, 3, 0, 0)
 
 NSIDCPath = "Data/NSIDCIceData/"
 
 MLDataLabelNames = ["Ocean", "SeaIce"]
 
-MinIceConc = 0
+MinIceConc = 150
 MaxIceConc = 1000
 SNRScaleFactor = 12
 NoiseScaleFactor = 20000
@@ -45,6 +46,8 @@ from GNSSR_Python.CoastalDistanceMap import CoastalDistanceMap
 from GNSSR_Python.MapPlotter_Cartopy import MapPlotter
 import ReadNSIDCIceData
 from PIL import Image
+import keras
+import pickle
     
 def RunMERRBySLevel1bHistogramAndMapExample():
     #Ignore divide by NaN
@@ -81,6 +84,15 @@ def RunMERRBySLevel1bHistogramAndMapExample():
         Path(local_path).mkdir(parents=True, exist_ok=True)
     
     ID_NUM = 0
+    
+    if CLASSIFY_DATA:
+        print("Classifiying")
+        reconstructed_model = keras.models.load_model("ML_Toolkit/IceDNN.h5")
+        with open("ML_Toolkit/IceDNN.nncfg", "rb") as pklfile:
+            pkldict = pickle.load(pklfile)
+            X_min = pkldict["X_min"]
+            X_max = pkldict["X_max"]
+
     
     #Generate file input list for range
     for entry in dataList:
@@ -212,6 +224,9 @@ def RunMERRBySLevel1bHistogramAndMapExample():
             
             #print(filtered_IceData)
             
+            if CLASSIFY_DATA:
+                inputDataFrame = np.zeros((noDDMsFiltered, 8))
+            
             if GENERATE_TRAINING_DATA:
                 with open('IceTrainingDataV1.csv','a') as fd:
                     for i in range(0, noDDMsFiltered):
@@ -225,9 +240,7 @@ def RunMERRBySLevel1bHistogramAndMapExample():
                             local_path = os.path.join(dataFolder, MLDataLabelNames[1])
                             ClassName = MLDataLabelNames[1]
                             
-                        save_file_path_waveform = local_path + "/W-ID-%s" % str(ID_NUM).zfill(8)
-                        
-                        save_file_path_DDM = local_path + "/D-ID-%s" % str(ID_NUM).zfill(8)
+                        save_file_path = local_path + "/ID-%s" % str(ID_NUM).zfill(8)
                         
                         frame = [filtered_DDMSNRAtPeakSingleDDM[i], 
                                 filtered_SPElevationORF[i], 
@@ -239,8 +252,24 @@ def RunMERRBySLevel1bHistogramAndMapExample():
                                 filtered_AntennaGainTowardsSpecularPoint[i],
                                 ClassName
                                 ]
+                        
+                        classifyframe = [filtered_DDMSNRAtPeakSingleDDM[i], 
+                                filtered_SPElevationORF[i], 
+                                filtered_SPElevationARF[i], 
+                                filtered_MeanNoiseBox[i], 
+                                filtered_DDMOutputNumericalScaling[i],
+                                filtered_SPIncidenceAngle[i],
+                                SVN,
+                                filtered_AntennaGainTowardsSpecularPoint[i],
+                                ]
+                        
                         frame_string = "%f,%f,%f,%f,%f,%f,%f,%f,%s\n" % tuple(frame)
-                        fd.write(frame_string)
+                        
+                        #fd.write(frame_string)
+                        
+                        if CLASSIFY_DATA:
+                            inputDataFrame[i,:] = np.asarray(classifyframe)
+                        
                         
                         if GENERATE_TRAINING_DATA_NPY:
                             waveform = np.reshape(filtered_DDMs[i] / DDMScaleFactor, (2560))
@@ -254,18 +283,36 @@ def RunMERRBySLevel1bHistogramAndMapExample():
                                                     [SVN/100]
                                                     ))
                                                     
-                            np.save(save_file_path_waveform, w_data)
+                            np.save(save_file_path, w_data)
+                            
+                        
+                            
                         
                         if GENERATE_IMG_FILES:
-                            np.save(save_file_path_DDM, filtered_DDMs[i]/np.max(filtered_DDMs[i]))
                             im = Image.fromarray(filtered_DDMs[i])
-                            im.save(save_file_path_DDM + '.png')
+                            im.save(save_file_path + '.png')
                         
                         ID_NUM = ID_NUM + 1
-            
+                
+                # if we are classifiying, do it here
+                if CLASSIFY_DATA:
+                    print("Classifiying")
+                    #print(inputDataFrame.shape)
+                    #print(X_max.shape)
+                    #print(X_min.shape)
+                    ## DO CLASSIFICATION HERE ##
+                    if noDDMsFiltered != 0:
+                        processDataFrame = (inputDataFrame - X_min) / (X_max - X_min)
+                        predicteddataframe = reconstructed_model.predict(processDataFrame)
+                        predicteddataframe = np.argmax(predicteddataframe, axis = 1)
+                        print(predicteddataframe)
+                        mapPlotter.accumulateDataToMap(filtered_lat, filtered_lon, predicteddataframe)
+                        
+                
             #Accumulate values into the map
-            if len(filtered_lat) != 0:
-                mapPlotter.accumulateDataToMap(filtered_lat, filtered_lon, sigmaest)
+            #if len(filtered_lat) != 0:
+                #mapPlotter.accumulateDataToMap(filtered_lat, filtered_lon, filtered_IceData)
+            #    mapPlotter.accumulateDataToMap(filtered_lat, filtered_lon, sigmaest)
             # Go to next track
             trackNumber = trackNumber + 1
             ############
