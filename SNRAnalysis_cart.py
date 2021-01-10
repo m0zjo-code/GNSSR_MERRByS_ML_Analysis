@@ -45,7 +45,7 @@ def RunMERRBySLevel1bHistogramAndMapExample():
     x_hist = np.array([])
     y_hist = np.array([])
     
-    mapPlotter = MapPlotter(25e3, plotType = "South") #Map grid in km (at equator)
+    mapPlotter = MapPlotter(0.2, plotType = "PlateCarree") #Map grid in km (at equator)
     
     #Generate file input list for range
     for entry in dataList:

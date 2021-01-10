@@ -8,11 +8,13 @@ from pyproj import Transformer
 
 class MapPlotter:
     """A class that will plot a map in the specified projection.
+    If Plottype is: North, South or Robinson, boxsize is in m
+    Else, boxsize is in deg
     """
     
-    def __init__(self, boxSize, plotType = "FullRobinson"):
+    def __init__(self, boxSize, plotType = "PlateCarree"):
         """Generate the map grid points
-         Parameter: boxSize: Map grid in km (at center of projection)"""
+         Parameter: boxSize: Map grid in km (at center of projection) or degrees depending on plot type"""
         
         self.boxSize = boxSize
         
@@ -27,23 +29,28 @@ class MapPlotter:
             self.ax1 = plt.axes(projection=self.transfrom)
             self.ax1.set_extent([-180, 180, 50, 90], ccrs.PlateCarree())
         elif plotType == "FullRobinson":
+            print("### WARNING:The Robinson plotting projection is not fully supported")
             self.transfrom = ccrs.Robinson()
             self.ax1 = plt.axes(projection=self.transfrom)
             self.ax1.set_extent([-180, 180, -90, 90], ccrs.PlateCarree())
+        elif plotType == "PlateCarree":
+            self.transfrom = None
+            self.ax1 = plt.axes(projection=ccrs.PlateCarree())
             
         
         self.ax1.coastlines()
-        self.ax1.gridlines()
+        self.ax1.gridlines(crs = ccrs.PlateCarree(), draw_labels = True, linewidth = 2, color = "gray", alpha = 0.5, linestyle = "--")
         self.extent = self.ax1.get_extent()
         
-        self.transfrom_pyproj = CRS.from_dict(self.transfrom.proj4_params)
-        self.transto_pyproj = CRS.from_epsg(4326)
+        if self.transfrom != None:
+            self.transfrom_pyproj = CRS.from_dict(self.transfrom.proj4_params)
+            self.transto_pyproj = CRS.from_epsg(4326)
+            
+            self.transformer = Transformer.from_proj(self.transfrom_pyproj, self.transto_pyproj)
+            self.transformer_reverse = Transformer.from_proj(self.transto_pyproj, self.transfrom_pyproj)
         
-        self.transformer = Transformer.from_proj(self.transfrom_pyproj, self.transto_pyproj)
-        self.transformer_reverse = Transformer.from_proj(self.transto_pyproj, self.transfrom_pyproj)
-        
-        self.rows     = np.arange(self.extent[0], self.extent[1], self.boxSize)
-        self.coloumns = np.arange(self.extent[2], self.extent[3], self.boxSize)
+        self.coloumns     = np.arange(self.extent[0], self.extent[1]+self.boxSize, self.boxSize)
+        self.rows = np.arange(self.extent[2], self.extent[3]+self.boxSize, self.boxSize)
         
         self.accum = np.zeros((self.rows.shape[0],self.coloumns.shape[0]))
         self.count = np.zeros((self.rows.shape[0],self.coloumns.shape[0]))
@@ -57,9 +64,10 @@ class MapPlotter:
         #longitudeArray = np.zeros(1);
         #latitudeArray =  np.zeros(1);
         #vals = np.ones(1);
-        
-        yScaled, xScaled = self.transformer_reverse.transform(latitudeArray, longitudeArray)
-        
+        if self.transfrom != None:
+            yScaled, xScaled = self.transformer_reverse.transform(latitudeArray, longitudeArray)
+        else:
+            yScaled, xScaled = longitudeArray, latitudeArray
         #print(xScaled, yScaled)
         
         xidx = np.zeros(xScaled.shape)
